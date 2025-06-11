@@ -1,0 +1,5 @@
+pyannote.audio
+huggingface_hub
+python-dotenv
+pydub
+PySide6
