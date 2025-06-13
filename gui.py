@@ -29,6 +29,30 @@ class TranscribeThread(QtCore.QThread):
             result = f"Error: {e}"
         self.finished.emit(result)
 
+
+class FileDropEdit(QtWidgets.QLineEdit):
+    """QLineEdit that accepts drag-and-drop of audio files."""
+
+    AUDIO_EXT = {'.wav', '.mp3', '.m4a'}
+
+    def __init__(self):
+        super().__init__()
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if urls and urls[0].toLocalFile().lower().endswith(tuple(self.AUDIO_EXT)):
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            path = event.mimeData().urls()[0].toLocalFile()
+            if path:
+                self.setText(path)
+
 class TranscriberGUI(QtWidgets.QWidget):
     MODELS = [
         "openai/whisper-small",
@@ -45,11 +69,16 @@ class TranscriberGUI(QtWidgets.QWidget):
         self.model_combo = QtWidgets.QComboBox()
         self.model_combo.addItems(self.MODELS)
 
-        self.file_edit = QtWidgets.QLineEdit()
+        self.file_edit = FileDropEdit()
+        self.file_edit.setPlaceholderText('Drop audio file or browse')
         self.browse_btn = QtWidgets.QPushButton('Browse')
         self.run_btn = QtWidgets.QPushButton('Run')
+        self.progress = QtWidgets.QProgressBar()
+        self.progress.setValue(0)
         self.output = QtWidgets.QTextEdit()
         self.output.setReadOnly(True)
+        self.save_btn = QtWidgets.QPushButton('Save')
+        self.save_btn.setEnabled(False)
 
         self.layout.addWidget(self.model_combo)
         file_layout = QtWidgets.QHBoxLayout()
@@ -57,13 +86,17 @@ class TranscriberGUI(QtWidgets.QWidget):
         file_layout.addWidget(self.browse_btn)
         self.layout.addLayout(file_layout)
         self.layout.addWidget(self.run_btn)
+        self.layout.addWidget(self.progress)
         self.layout.addWidget(self.output)
+        self.layout.addWidget(self.save_btn)
 
         self.browse_btn.clicked.connect(self.select_file)
         self.run_btn.clicked.connect(self.start_transcription)
+        self.save_btn.clicked.connect(self.save_text)
 
         load_dotenv()
         self.thread = None
+        self.current_text = ''
 
     def select_file(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Select Audio')
@@ -74,6 +107,8 @@ class TranscriberGUI(QtWidgets.QWidget):
         if not self.file_edit.text():
             return
         self.run_btn.setEnabled(False)
+        self.save_btn.setEnabled(False)
+        self.progress.setRange(0, 0)
         model = self.model_combo.currentText()
         path = self.file_edit.text()
         self.output.setPlainText('Running...')
@@ -84,7 +119,19 @@ class TranscriberGUI(QtWidgets.QWidget):
 
     def display_result(self, text):
         self.output.setPlainText(text)
+        self.current_text = text
         self.run_btn.setEnabled(True)
+        self.save_btn.setEnabled(True)
+        self.progress.setRange(0, 1)
+        self.progress.setValue(1)
+
+    def save_text(self):
+        if not self.current_text:
+            return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, 'Save Text', filter='Text Files (*.txt)')
+        if path:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(self.current_text)
 
 
 def main():

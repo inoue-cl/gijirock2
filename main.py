@@ -101,10 +101,17 @@ def transcribe(path: str, model: str, use_gpu: bool = False) -> List[Dict]:
 def format_segments(segments: List[Dict]) -> str:
     """Return formatted transcription string."""
     lines = []
+    speaker_map = {}
+    next_idx = 0
     for seg in segments:
         start = time.strftime("%H:%M:%S", time.gmtime(seg["start"]))
         end = time.strftime("%H:%M:%S", time.gmtime(seg["end"]))
-        speaker = seg["speaker"] or "話者"
+        spk = seg.get("speaker")
+        if spk not in speaker_map:
+            label = chr(ord('A') + next_idx)
+            speaker_map[spk] = f"話者{label}"
+            next_idx += 1
+        speaker = speaker_map[spk]
         lines.append(f"[{start} - {end}] {speaker}: {seg['text']}")
     return "\n".join(lines)
 
