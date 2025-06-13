@@ -6,7 +6,6 @@ dependencies:
   - python=3.10
   - pytorch=2.7.1
   - torchaudio=2.7.1
-  - scipy
   - pip
   - pip:
       - -r requirements.txt

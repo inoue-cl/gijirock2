@@ -2,12 +2,9 @@ import argparse
 import os
 import sys
 from dotenv import load_dotenv
-from pydub import AudioSegment, effects
+from pydub import AudioSegment
 from transformers import pipeline
 from typing import List, Dict, Optional
-import numpy as np
-import noisereduce as nr
-from scipy.signal import butter, filtfilt
 import time
 
 # ─── ffmpeg パス設定（OS別）
@@ -65,29 +62,30 @@ def _load_diarization_pipeline(threshold: float, min_cluster_size: int,
         return None
 
 
-def _preprocess_audio(audio: AudioSegment) -> AudioSegment:
-    """Apply noise reduction, high-pass filter and normalization."""
-    sr = audio.frame_rate
-    samples = np.array(audio.get_array_of_samples()).astype(np.float32)
-    reduced = nr.reduce_noise(y=samples, sr=sr)
-    b, a = butter(1, 100 / (0.5 * sr), btype="highpass")
-    filtered = filtfilt(b, a, reduced)
-    max_val = np.max(np.abs(filtered))
-    if max_val > 0:
-        filtered = filtered / max_val * (2 ** 15 - 1)
-    new_audio = audio._spawn(filtered.astype(np.int16).tobytes())
-    new_audio = new_audio.set_frame_rate(sr)
-    return effects.normalize(new_audio)
+def _preprocess_audio(path: str, highpass: int, lowpass: int, nf: int) -> AudioSegment:
+    """Run FFmpeg-based filtering and return processed audio."""
+    filters = f"highpass=f={highpass},lowpass=f={lowpass},loudnorm,afftdn=nf={nf}"
+    tmp = path + ".filtered.wav"
+    AudioSegment.from_file(path).export(
+        tmp, format="wav", parameters=["-af", filters]
+    )
+    processed = AudioSegment.from_file(tmp)
+    os.remove(tmp)
+    return processed
 
 
-def _merge_segments(segments: List[Dict], gap: float = 0.3) -> List[Dict]:
-    """Merge consecutive segments from the same speaker."""
+def _merge_segments(segments: List[Dict], short_dur: float = 3.0, gap: float = 0.5) -> List[Dict]:
+    """Merge short consecutive segments from the same speaker."""
     if not segments:
         return []
     merged = [segments[0].copy()]
     for seg in segments[1:]:
         last = merged[-1]
-        if seg["speaker"] == last["speaker"] and seg["start"] - last["end"] <= gap:
+        same = seg["speaker"] == last["speaker"]
+        short = (seg["end"] - seg["start"] <= short_dur) or (
+            last["end"] - last["start"] <= short_dur
+        )
+        if same and (seg["start"] - last["end"] <= gap or short):
             last["end"] = seg["end"]
             last["text"] += " " + seg["text"]
         else:
@@ -97,12 +95,12 @@ def _merge_segments(segments: List[Dict], gap: float = 0.3) -> List[Dict]:
 
 def transcribe(path: str, model: str, use_gpu: bool = False,
                threshold: float = 0.5, min_cluster_size: int = 15,
-               min_on: float = 0.5, min_off: float = 0.5) -> List[Dict]:
+               min_on: float = 0.5, min_off: float = 0.5,
+               hp: int = 80, lp: int = 8000, nf: int = -25) -> List[Dict]:
     """Transcribe the given audio file and return list of segments."""
     device = 0 if use_gpu else -1
 
-    audio = AudioSegment.from_file(path)
-    audio = _preprocess_audio(audio)
+    audio = _preprocess_audio(path, hp, lp, nf)
     temp_path = "temp_audio.wav"
     audio.export(temp_path, format="wav")
 
@@ -173,6 +171,9 @@ def main(argv=None):
     parser.add_argument('--cluster-size', type=int, default=15, help='Minimum cluster size')
     parser.add_argument('--min-duration-on', type=float, default=0.5, help='Minimum speech segment length')
     parser.add_argument('--min-duration-off', type=float, default=0.5, help='Minimum silence length')
+    parser.add_argument('--highpass', type=int, default=80, help='High-pass filter frequency')
+    parser.add_argument('--lowpass', type=int, default=8000, help='Low-pass filter frequency')
+    parser.add_argument('--noise-floor', type=int, default=-25, help='Noise reduction level')
     args = parser.parse_args(argv)
 
     print("🔍 モデル読み込み中（これは初回は時間かかるよ）…")
@@ -184,6 +185,9 @@ def main(argv=None):
         min_cluster_size=args.cluster_size,
         min_on=args.min_duration_on,
         min_off=args.min_duration_off,
+        hp=args.highpass,
+        lp=args.lowpass,
+        nf=args.noise_floor,
     )
 
     print("\n✅ --- 認識結果 --- ✅\n")
