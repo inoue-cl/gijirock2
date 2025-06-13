@@ -29,7 +29,8 @@ HF_TOKEN=your_token_here
 
 ### CLI
 ```
-python main.py path/to/file.wav --model openai/whisper-small
+python main.py path/to/file.wav --model openai/whisper-small \
+  --threshold 0.5 --min-duration-on 0.5 --min-duration-off 0.5
 ```
 
 ### GUI
@@ -40,6 +41,10 @@ The GUI supports drag-and-drop of audio files, a progress bar during
 transcription and a **Save** button to export the result to a text file.
 Speaker diarization results are displayed as "話者A", "話者B" and so on for
 clarity when multiple speakers are detected.
+Audio is preprocessed with noise reduction and filtering before
+transcription for better diarization accuracy.
+You can tweak diarization thresholds and minimum segment length in the GUI to
+better adapt to noisy audio. Presets are available for common scenarios.
 
 ## Building executables
 Run the helper script which uses PyInstaller on Windows and directory packaging on macOS:
