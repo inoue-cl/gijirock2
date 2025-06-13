@@ -4,6 +4,8 @@ import sys
 from dotenv import load_dotenv
 from pydub import AudioSegment
 from transformers import pipeline
+from typing import List, Dict, Optional
+import time
 
 # ─── ffmpeg パス設定（OS別）
 def get_ffmpeg_path() -> str:
@@ -25,27 +27,86 @@ if os.path.exists(FFMPEG_BINARY):
 
 # ─── .env からトークンを読み込む（オプション扱い）
 load_dotenv()
-HF_TOKEN = os.getenv("HF_TOKEN")  # 今後は不要になるがログイン済チェック用に保持
+HF_TOKEN = os.getenv("HF_TOKEN")  # 使用可能なら話者分離に利用
 
-def transcribe(path: str, model: str, use_gpu: bool = False):
+
+def _load_diarization_pipeline() -> Optional["Pipeline"]:
+    """Optionally load pyannote's speaker diarization pipeline."""
+    try:
+        from pyannote.audio import Pipeline as PyannotePipeline
+    except Exception:
+        return None
+
+    token = os.getenv("HF_TOKEN")
+    if not token:
+        return None
+
+    try:
+        return PyannotePipeline.from_pretrained(
+            "pyannote/speaker-diarization",
+            use_auth_token=token,
+        )
+    except Exception:
+        return None
+
+
+def transcribe(path: str, model: str, use_gpu: bool = False) -> List[Dict]:
+    """Transcribe the given audio file and return list of segments."""
     device = 0 if use_gpu else -1
 
-    # 入力音声を一時 WAV に変換
     audio = AudioSegment.from_file(path)
     temp_path = "temp_audio.wav"
     audio.export(temp_path, format="wav")
 
-    # Whisper パイプライン（トークンは既に認証済みなので渡さない）
     asr = pipeline(
         "automatic-speech-recognition",
         model=model,
-        device=device
+        device=device,
+        return_timestamps=True,
+        generate_kwargs={"language": "ja", "task": "transcribe"},
     )
+
+    diarizer = _load_diarization_pipeline()
+
+    diarization_result = None
+    if diarizer is not None:
+        try:
+            diarization_result = diarizer(temp_path)
+        except Exception:
+            diarization_result = None
 
     result = asr(temp_path)
     os.remove(temp_path)
 
-    return result["text"]
+    segments = []
+    for chunk in result.get("chunks", []):
+        start, end = chunk["timestamp"]
+        text = chunk["text"].strip()
+        speaker = None
+        if diarization_result is not None:
+            for turn, _, spk in diarization_result.itertracks(yield_label=True):
+                if start >= turn.start and end <= turn.end:
+                    speaker = spk
+                    break
+        segments.append({
+            "start": float(start),
+            "end": float(end),
+            "speaker": speaker,
+            "text": text,
+        })
+
+    return segments
+
+
+def format_segments(segments: List[Dict]) -> str:
+    """Return formatted transcription string."""
+    lines = []
+    for seg in segments:
+        start = time.strftime("%H:%M:%S", time.gmtime(seg["start"]))
+        end = time.strftime("%H:%M:%S", time.gmtime(seg["end"]))
+        speaker = seg["speaker"] or "話者"
+        lines.append(f"[{start} - {end}] {speaker}: {seg['text']}")
+    return "\n".join(lines)
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Simple CLI for speech recognition')
@@ -55,10 +116,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     print("🔍 モデル読み込み中（これは初回は時間かかるよ）…")
-    text = transcribe(args.file, args.model, args.use_gpu)
-    
+    segments = transcribe(args.file, args.model, args.use_gpu)
+
     print("\n✅ --- 認識結果 --- ✅\n")
-    print(text)
+    print(format_segments(segments))
 
 if __name__ == '__main__':
     main()
