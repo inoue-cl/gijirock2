@@ -29,9 +29,7 @@ HF_TOKEN=your_token_here
 
 ### CLI
 ```
-python main.py path/to/file.wav --model openai/whisper-small \
-  --threshold 0.5 --min-duration-on 0.5 --min-duration-off 0.5 \
-  --highpass 80 --lowpass 8000 --noise-floor -25
+python main.py path/to/file.wav --model openai/whisper-large-v3
 ```
 
 ### GUI
@@ -43,9 +41,9 @@ transcription and a **Save** button to export the result to a text file.
 Speaker diarization results are displayed as "話者A", "話者B" and so on for
 clarity when multiple speakers are detected.
 Audio is preprocessed with FFmpeg filters (`highpass`, `lowpass`, `loudnorm`,
-`afftdn`) before transcription. The GUI lets you tune these filter values or
-choose from presets such as **会議室** or **電話** to match your recording
-environment. Diarization thresholds can also be adjusted for noisy audio.
+`afftdn`) before transcription. Choose a preset such as **会議室** or **電話**
+to match your recording environment. Speaker labels appear as "話者A",
+"話者B", and so on.
 
 ## Building executables
 Run the helper script which uses PyInstaller on Windows and directory packaging on macOS:

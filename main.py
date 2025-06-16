@@ -29,9 +29,22 @@ if os.path.exists(FFMPEG_BINARY):
 load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN")  # 使用可能なら話者分離に利用
 
+# ─── 固定パラメータ（GUIでは非表示）
+THRESHOLD = 0.3
+CLUSTER_SIZE = 10
+MIN_ON = 0.3
+MIN_OFF = 0.3
+HIGHPASS = 80
+LOWPASS = 8000
+NOISE_FLOOR = -20
 
-def _load_diarization_pipeline(threshold: float, min_cluster_size: int,
-                               min_on: float, min_off: float) -> Optional["Pipeline"]:
+
+def _load_diarization_pipeline(
+    threshold: float = THRESHOLD,
+    min_cluster_size: int = CLUSTER_SIZE,
+    min_on: float = MIN_ON,
+    min_off: float = MIN_OFF,
+) -> Optional["Pipeline"]:
     """Load pyannote's speaker diarization pipeline with tuned parameters."""
     try:
         from pyannote.audio import Pipeline as PyannotePipeline
@@ -62,7 +75,12 @@ def _load_diarization_pipeline(threshold: float, min_cluster_size: int,
         return None
 
 
-def _preprocess_audio(path: str, highpass: int, lowpass: int, nf: int) -> AudioSegment:
+def _preprocess_audio(
+    path: str,
+    highpass: int = HIGHPASS,
+    lowpass: int = LOWPASS,
+    nf: int = NOISE_FLOOR,
+) -> AudioSegment:
     """Run FFmpeg-based filtering and return processed audio."""
     filters = f"highpass=f={highpass},lowpass=f={lowpass},loudnorm,afftdn=nf={nf}"
     tmp = path + ".filtered.wav"
@@ -93,10 +111,18 @@ def _merge_segments(segments: List[Dict], short_dur: float = 3.0, gap: float = 0
     return merged
 
 
-def transcribe(path: str, model: str, use_gpu: bool = False,
-               threshold: float = 0.5, min_cluster_size: int = 15,
-               min_on: float = 0.5, min_off: float = 0.5,
-               hp: int = 80, lp: int = 8000, nf: int = -25) -> List[Dict]:
+def transcribe(
+    path: str,
+    model: str,
+    use_gpu: bool = False,
+    threshold: float = THRESHOLD,
+    min_cluster_size: int = CLUSTER_SIZE,
+    min_on: float = MIN_ON,
+    min_off: float = MIN_OFF,
+    hp: int = HIGHPASS,
+    lp: int = LOWPASS,
+    nf: int = NOISE_FLOOR,
+) -> List[Dict]:
     """Transcribe the given audio file and return list of segments."""
     device = 0 if use_gpu else -1
 
@@ -117,7 +143,7 @@ def transcribe(path: str, model: str, use_gpu: bool = False,
     diarization_result = None
     if diarizer is not None:
         try:
-            diarization_result = diarizer(temp_path)
+            diarization_result = diarizer(temp_path, num_speakers=2)
         except Exception:
             diarization_result = None
 
@@ -165,15 +191,15 @@ def format_segments(segments: List[Dict]) -> str:
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Simple CLI for speech recognition')
     parser.add_argument('file', help='audio file path')
-    parser.add_argument('--model', default='openai/whisper-small', help='HuggingFace model name')
+    parser.add_argument('--model', default='openai/whisper-large-v3', help='HuggingFace model name')
     parser.add_argument('--use-gpu', action='store_true', help='Enable GPU acceleration')
-    parser.add_argument('--threshold', type=float, default=0.5, help='Diarization clustering threshold')
-    parser.add_argument('--cluster-size', type=int, default=15, help='Minimum cluster size')
-    parser.add_argument('--min-duration-on', type=float, default=0.5, help='Minimum speech segment length')
-    parser.add_argument('--min-duration-off', type=float, default=0.5, help='Minimum silence length')
-    parser.add_argument('--highpass', type=int, default=80, help='High-pass filter frequency')
-    parser.add_argument('--lowpass', type=int, default=8000, help='Low-pass filter frequency')
-    parser.add_argument('--noise-floor', type=int, default=-25, help='Noise reduction level')
+    parser.add_argument('--threshold', type=float, default=THRESHOLD, help='Diarization clustering threshold')
+    parser.add_argument('--cluster-size', type=int, default=CLUSTER_SIZE, help='Minimum cluster size')
+    parser.add_argument('--min-duration-on', type=float, default=MIN_ON, help='Minimum speech segment length')
+    parser.add_argument('--min-duration-off', type=float, default=MIN_OFF, help='Minimum silence length')
+    parser.add_argument('--highpass', type=int, default=HIGHPASS, help='High-pass filter frequency')
+    parser.add_argument('--lowpass', type=int, default=LOWPASS, help='Low-pass filter frequency')
+    parser.add_argument('--noise-floor', type=int, default=NOISE_FLOOR, help='Noise reduction level')
     args = parser.parse_args(argv)
 
     print("🔍 モデル読み込み中（これは初回は時間かかるよ）…")
